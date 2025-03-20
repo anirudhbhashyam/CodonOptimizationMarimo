@@ -246,13 +246,14 @@ def _(components, five_prime_flank, mo, optimized_seqs, pl, three_prime_flank):
         header: f"{five_prime_flank_value}{seq}{three_prime_flank_value}"
         for header, seq in optimized_seqs.items()
     }
-    if len(final_seqs) > 0:
-        mo.vstack(
-            [
-                mo.md("### Optimized sequences"),
-                mo.ui.text_area("\n".join(f">{header}\n{seq}" for header, seq in final_seqs.items())),
-            ],
-        )
+    mo.vstack(
+        [
+            mo.md("### Optimized sequences"),
+            mo.ui.table(
+                pl.DataFrame({"name": final_seqs.keys(), "seq": final_seqs.values()})
+            ),
+        ],
+    )
     return final_seqs, five_prime_flank_value, three_prime_flank_value
 
 
