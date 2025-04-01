@@ -20,6 +20,8 @@ def _():
 
     import marimo as mo
 
+    from pathlib import Path
+
     import polars as pl
 
     from typing import Iterator
@@ -31,6 +33,7 @@ def _():
         EnforceTranslation,
         FastaFile,
         Iterator,
+        Path,
         StringIO,
         mo,
         pl,
@@ -39,37 +42,37 @@ def _():
 
 @app.cell
 def _(Iterator):
-    aa_to_most_frequent_codons = dict(
-        [
-            ("*", "TGA"),
-            ("A", "GCC"),
-            ("C", "TGC"),
-            ("D", "GAC"),
-            ("E", "GAG"),
-            ("F", "TTC"),
-            ("G", "GGC"),
-            ("H", "CAC"),
-            ("I", "ATC"),
-            ("K", "AAG"),
-            ("L", "CTG"),
-            ("M", "ATG"),
-            ("N", "AAC"),
-            ("P", "CCC"),
-            ("Q", "CAG"),
-            ("R", "AGA"),
-            ("S", "AGC"),
-            ("T", "ACC"),
-            ("V", "GTG"),
-            ("W", "TGG"),
-            ("Y", "TAC"),
-        ],
-    )
     def backtranslate_orf(seq: str) -> Iterator[str]: 
+        aa_to_codon = dict(
+            [
+                ("*", "TGA"),
+                ("A", "GCC"),
+                ("C", "TGC"),
+                ("D", "GAC"),
+                ("E", "GAG"),
+                ("F", "TTC"),
+                ("G", "GGC"),
+                ("H", "CAC"),
+                ("I", "ATC"),
+                ("K", "AAG"),
+                ("L", "CTG"),
+                ("M", "ATG"),
+                ("N", "AAC"),
+                ("P", "CCC"),
+                ("Q", "CAG"),
+                ("R", "AGA"),
+                ("S", "AGC"),
+                ("T", "ACC"),
+                ("V", "GTG"),
+                ("W", "TGG"),
+                ("Y", "TAC"),
+            ],
+        )
         for aa in seq:
-            if not aa in aa_to_most_frequent_codons:
+            if not aa in aa_to_codon:
                 raise ValueError("Sequence contains invalid amino acids.")
-            yield aa_to_most_frequent_codons[aa]
-    return aa_to_most_frequent_codons, backtranslate_orf
+            yield aa_to_codon[aa]
+    return (backtranslate_orf,)
 
 
 @app.cell
@@ -87,7 +90,31 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _(Path, pl):
+    CODON_TABLES_PATH = Path("./codon_usage_tables").resolve()
+    def get_codon_table_species(species: str, convert_U_to_T: bool = True) -> dict[str, dict[str, float]]:
+        codon_table = pl.read_csv(CODON_TABLES_PATH / f"{species}.csv")
+        return {
+            aa: {
+                codon.replace("U", "T"): freq
+                for codon, freq in codon_table.filter(
+                    pl.col("amino_acid") == aa
+                ).select(
+                    pl.col("codon", "relative_frequency"),
+                ).iter_rows()
+            }
+            for aa in codon_table["amino_acid"].unique()
+        }
+
+    def get_available_species() -> set[str]:
+        return {
+            s.stem for s in CODON_TABLES_PATH.glob("*.csv")
+        }
+    return CODON_TABLES_PATH, get_available_species, get_codon_table_species
+
+
+@app.cell
+def _(get_available_species, mo):
     site_exclusion = mo.ui.multiselect(
         [
             "XbaI_site",
@@ -99,18 +126,8 @@ def _(mo):
         full_width = True,
     )
     species = mo.ui.multiselect(
-        [
-            "b_subtilis",
-            "c_elegans",
-            "d_melanogaster",
-            "e_coli",
-            "g_gallus",
-            "h_sapiens",
-            "m_musculus",
-            "m_musculus_domesticus",
-            "s_cerevisiae",
-        ],
-        value = ["h_sapiens", "m_musculus"],
+        get_available_species(),
+        value = ["h_sapiens_9606"],
         full_width = True,
     )
     mo.hstack(
@@ -143,6 +160,7 @@ def _(
     FastaFile,
     StringIO,
     backtranslate_orf,
+    get_codon_table_species,
     mo,
     sequences_input,
     site_exclusion,
@@ -163,9 +181,9 @@ def _(
                 EnforceTranslation(),
             ],
             objectives = [
-                CodonOptimize(species = s)
+                CodonOptimize(codon_usage_table = get_codon_table_species(s))
                 for s in species.value
-            ]
+            ],
         )
         problem.max_random_iters = 5000
         problem.resolve_constraints()
@@ -255,6 +273,11 @@ def _(components, five_prime_flank, mo, optimized_seqs, pl, three_prime_flank):
         ],
     )
     return final_seqs, five_prime_flank_value, three_prime_flank_value
+
+
+@app.cell
+def _():
+    return
 
 
 if __name__ == "__main__":
